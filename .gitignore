@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+api_key.txt
+.DS_Store
+venv/
+wc_predictor_env/
+*.csv
+*.pkl
+training_data/
