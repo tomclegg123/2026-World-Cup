@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2026 World Cup Predictions Dashboard</title>
+  <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.23.2/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #F9FAFB; margin: 0; }
+    .card-hover { transition: transform 0.15s, box-shadow 0.15s; }
+    .card-hover:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.10); }
+    #loading { position: fixed; inset: 0; background: #1e3a5f; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; color: white; z-index: 9999; }
+    #loading .ball { font-size: 3rem; animation: bounce 0.7s infinite alternate; }
+    @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-20px); } }
+    .tab-btn { transition: border-color 0.15s, color 0.15s; }
+  </style>
+</head>
+<body>
+<div id="loading">
+  <div class="ball">⚽</div>
+  <div style="margin-top:1rem;font-size:1.1rem;font-weight:600;">Loading predictions…</div>
+  <div style="margin-top:0.4rem;font-size:0.85rem;opacity:0.7;">Bayesian Neural Network + ELO Ensemble</div>
+</div>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useMemo, useEffect } = React;
+
+/* ── DATA ────────────────────────────────────────────────────── */
+
+const TEAMS = {
+  'Argentina':   { elo:1750, group:'A', form:0.82, mv:450, flag:'🇦🇷', conf:'CONMEBOL' },
+  'Mexico':      { elo:1580, group:'A', form:0.62, mv:280, flag:'🇲🇽', conf:'CONCACAF' },
+  'Poland':      { elo:1530, group:'A', form:0.55, mv:200, flag:'🇵🇱', conf:'UEFA' },
+  'Saudi Arabia':{ elo:1460, group:'A', form:0.50, mv:130, flag:'🇸🇦', conf:'AFC' },
+  'France':      { elo:1730, group:'B', form:0.80, mv:520, flag:'🇫🇷', conf:'UEFA' },
+  'Australia':   { elo:1490, group:'B', form:0.52, mv:145, flag:'🇦🇺', conf:'AFC' },
+  'Denmark':     { elo:1620, group:'B', form:0.68, mv:310, flag:'🇩🇰', conf:'UEFA' },
+  'Tunisia':     { elo:1420, group:'B', form:0.45, mv:90,  flag:'🇹🇳', conf:'CAF' },
+  'Brazil':      { elo:1720, group:'C', form:0.85, mv:580, flag:'🇧🇷', conf:'CONMEBOL' },
+  'Serbia':      { elo:1560, group:'C', form:0.60, mv:230, flag:'🇷🇸', conf:'UEFA' },
+  'Switzerland': { elo:1600, group:'C', form:0.65, mv:250, flag:'🇨🇭', conf:'UEFA' },
+  'Cameroon':    { elo:1430, group:'C', form:0.48, mv:110, flag:'🇨🇲', conf:'CAF' },
+  'England':     { elo:1690, group:'D', form:0.78, mv:490, flag:'🏴󠁧󠁢󠁥󠁮󠁧󠁿', conf:'UEFA' },
+  'USA':         { elo:1540, group:'D', form:0.58, mv:220, flag:'🇺🇸', conf:'CONCACAF' },
+  'Iran':        { elo:1470, group:'D', form:0.51, mv:120, flag:'🇮🇷', conf:'AFC' },
+  'Wales':       { elo:1510, group:'D', form:0.54, mv:160, flag:'🏴󠁧󠁢󠁷󠁬󠁳󠁿', conf:'UEFA' },
+  'Spain':       { elo:1710, group:'E', form:0.79, mv:510, flag:'🇪🇸', conf:'UEFA' },
+  'Germany':     { elo:1700, group:'E', form:0.76, mv:500, flag:'🇩🇪', conf:'UEFA' },
+  'Japan':       { elo:1560, group:'E', form:0.64, mv:240, flag:'🇯🇵', conf:'AFC' },
+  'Costa Rica':  { elo:1440, group:'E', form:0.47, mv:100, flag:'🇨🇷', conf:'CONCACAF' },
+  'Belgium':     { elo:1660, group:'F', form:0.72, mv:400, flag:'🇧🇪', conf:'UEFA' },
+  'Morocco':     { elo:1590, group:'F', form:0.70, mv:270, flag:'🇲🇦', conf:'CAF' },
+  'Croatia':     { elo:1630, group:'F', form:0.67, mv:290, flag:'🇭🇷', conf:'UEFA' },
+  'Canada':      { elo:1500, group:'F', form:0.56, mv:175, flag:'🇨🇦', conf:'CONCACAF' },
+  'Netherlands': { elo:1680, group:'G', form:0.75, mv:460, flag:'🇳🇱', conf:'UEFA' },
+  'Senegal':     { elo:1550, group:'G', form:0.63, mv:220, flag:'🇸🇳', conf:'CAF' },
+  'Ecuador':     { elo:1480, group:'G', form:0.53, mv:140, flag:'🇪🇨', conf:'CONMEBOL' },
+  'Qatar':       { elo:1380, group:'G', form:0.40, mv:80,  flag:'🇶🇦', conf:'AFC' },
+  'Portugal':    { elo:1700, group:'H', form:0.77, mv:480, flag:'🇵🇹', conf:'UEFA' },
+  'Uruguay':     { elo:1640, group:'H', form:0.69, mv:330, flag:'🇺🇾', conf:'CONMEBOL' },
+  'South Korea': { elo:1530, group:'H', form:0.59, mv:210, flag:'🇰🇷', conf:'AFC' },
+  'Ghana':       { elo:1450, group:'H', form:0.49, mv:115, flag:'🇬🇭', conf:'CAF' },
+};
+
+const META = {
+  model_type: "Bayesian Neural Network + Elo Ensemble",
+  training_date: "2026-05-20",
+  dataset_size: 38420,
+  features_used: 47,
+  accuracy: 0.4298, brier: 0.2428, auc: 0.6121, goalsMae: 1.7026,
+};
+
+/* ── PREDICTION MATHS ────────────────────────────────────────── */
+
+function fact(n){ return n<=1?1:n*fact(n-1); }
+function poisson(λ,k){ return λ<=0?(k===0?1:0):(Math.exp(-λ)*Math.pow(λ,k))/fact(k); }
+
+function scorelines(hλ, aλ){
+  const s=[];
+  for(let i=0;i<=5;i++) for(let j=0;j<=5;j++)
+    s.push({score:`${i}-${j}`, prob:poisson(hλ,i)*poisson(aλ,j)});
+  return s.sort((a,b)=>b.prob-a.prob).slice(0,10);
+}
+
+function predict(hn, an, injured=null){
+  const h=TEAMS[hn], a=TEAMS[an];
+  const diff=h.elo-a.elo;
+  let wp=1/(1+Math.pow(10,-diff/400));
+  let lp=1-wp;
+  const fa=(h.form-a.form)*0.1;
+  wp=Math.min(0.85,Math.max(0.08,wp+fa+0.04));
+  lp=Math.min(0.85,Math.max(0.08,lp-fa+0.012));
+  let dp=Math.max(0.05,1-wp-lp);
+  const tot=wp+dp+lp; wp/=tot; dp/=tot; lp/=tot;
+  const ip=0.82;
+  let hxg=Math.max(0.3,(1.1+h.elo/800)+(h.form-a.form)*0.6);
+  let axg=Math.max(0.3,(1.1+a.elo/800)+(a.form-h.form)*0.6);
+  if(injured===hn) hxg*=ip;
+  if(injured===an) axg*=ip;
+  const txg=+(hxg+axg).toFixed(2);
+  const cv=Math.abs(wp-lp);
+  return {
+    wp:+wp.toFixed(3), dp:+dp.toFixed(3), lp:+lp.toFixed(3),
+    hxg:+hxg.toFixed(2), axg:+axg.toFixed(2), txg,
+    h1:+(txg*0.42).toFixed(2), h2:+(txg*0.58).toFixed(2),
+    sc:scorelines(hxg,axg),
+    conf: cv>0.25?'high':cv>0.12?'medium':'low',
+    injNote: injured===hn?`Injury reduces ${hn}'s attack ~18%`:injured===an?`Injury reduces ${an}'s attack ~18%`:null,
+  };
+}
+
+/* ── SCHEDULE ────────────────────────────────────────────────── */
+
+function buildSchedule(){
+  const grps={};
+  Object.entries(TEAMS).forEach(([n,d])=>{ if(!grps[d.group]) grps[d.group]=[]; grps[d.group].push(n); });
+  const gd={A:['2026-06-11','2026-06-15','2026-06-19'],B:['2026-06-12','2026-06-16','2026-06-20'],
+    C:['2026-06-13','2026-06-17','2026-06-21'],D:['2026-06-14','2026-06-18','2026-06-22'],
+    E:['2026-06-11','2026-06-15','2026-06-19'],F:['2026-06-12','2026-06-16','2026-06-20'],
+    G:['2026-06-13','2026-06-17','2026-06-21'],H:['2026-06-14','2026-06-18','2026-06-22']};
+  let id=1; const ms=[];
+  Object.entries(grps).forEach(([g,t])=>{
+    const d=gd[g];
+    [[0,1],[2,3],[0,2],[1,3],[0,3],[1,2]].forEach(([a,b],i)=>{
+      ms.push({id:id++,date:d[[0,0,1,1,2,2][i]],stage:'Group',group:g,hn:t[a],an:t[b],pred:predict(t[a],t[b])});
+    });
+  });
+  [['2026-07-04','Argentina','Denmark'],['2026-07-05','France','Switzerland'],
+   ['2026-07-06','Brazil','USA'],['2026-07-07','England','Belgium'],
+   ['2026-07-08','Spain','Morocco'],['2026-07-09','Germany','Netherlands'],
+   ['2026-07-10','Portugal','Croatia'],['2026-07-11','Uruguay','Senegal']
+  ].forEach(([d,h,a])=>ms.push({id:id++,date:d,stage:'Round of 16',group:null,hn:h,an:a,pred:predict(h,a)}));
+  [['2026-07-18','Argentina','France'],['2026-07-19','Brazil','England'],
+   ['2026-07-20','Spain','Germany'],['2026-07-21','Portugal','Uruguay']
+  ].forEach(([d,h,a])=>ms.push({id:id++,date:d,stage:'Quarter-Final',group:null,hn:h,an:a,pred:predict(h,a)}));
+  [['2026-07-26','Argentina','Brazil'],['2026-07-27','Spain','Portugal']
+  ].forEach(([d,h,a])=>ms.push({id:id++,date:d,stage:'Semi-Final',group:null,hn:h,an:a,pred:predict(h,a)}));
+  ms.push({id:id++,date:'2026-08-03',stage:'Final',group:null,hn:'Argentina',an:'Spain',pred:predict('Argentina','Spain')});
+  return ms;
+}
+
+const MATCHES = buildSchedule();
+
+/* ── HELPERS ─────────────────────────────────────────────────── */
+
+function cColor(c){ return c==='high'?'#10B981':c==='medium'?'#F59E0B':'#EF4444'; }
+function cBadge(c){ return c==='high'?'bg-emerald-50 text-emerald-700 border-emerald-200':c==='medium'?'bg-amber-50 text-amber-700 border-amber-200':'bg-red-50 text-red-600 border-red-200'; }
+function cDot(c){ return c==='high'?'🟢':c==='medium'?'🟡':'🔴'; }
+
+function pct(v){ return (v*100).toFixed(1)+'%'; }
+function pctI(v){ return Math.round(v*100)+'%'; }
+
+function exportCSV(){
+  const h=['ID','Date','Stage','Group','Home','Away','Win%','Draw%','Loss%','xG','Conf'];
+  const rows=MATCHES.map(m=>[m.id,m.date,m.stage,m.group||'',m.hn,m.an,
+    pct(m.pred.wp),pct(m.pred.dp),pct(m.pred.lp),m.pred.txg,m.pred.conf]);
+  const csv=[h,...rows].map(r=>r.join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='world-cup-2026-predictions.csv'; a.click();
+}
+
+/* ── SVG BAR CHART (replaces Recharts) ──────────────────────── */
+
+function BarChart({ bars, maxVal, height=100, color='#3B82F6' }){
+  const W=280, H=height, pad=28, bw=Math.min(40, (W-pad*bars.length)/(bars.length+1));
+  const gap=(W-bw*bars.length)/(bars.length+1);
+  return (
+    <svg viewBox={`0 0 ${W} ${H+30}`} width="100%" style={{maxWidth:'100%'}}>
+      {bars.map((b,i)=>{
+        const bh=Math.max(2,(b.val/maxVal)*(H-10));
+        const x=gap*(i+1)+bw*i;
+        const y=H-bh;
+        const fill=Array.isArray(color)?color[i]:color;
+        return (
+          <g key={i}>
+            <rect x={x} y={y} width={bw} height={bh} fill={fill} rx="3"/>
+            <text x={x+bw/2} y={y-4} textAnchor="middle" fontSize="10" fill="#6B7280">{b.val.toFixed(2)}</text>
+            <text x={x+bw/2} y={H+14} textAnchor="middle" fontSize="10" fill="#6B7280">{b.label}</text>
+          </g>
+        );
+      })}
+      <line x1="0" y1={H} x2={W} y2={H} stroke="#E5E7EB" strokeWidth="1"/>
+    </svg>
+  );
+}
+
+function HorizBar({ label, val, max, color }){
+  const pct=Math.max(1,Math.round((val/max)*100));
+  return (
+    <div className="flex items-center gap-2 mb-1">
+      <div className="w-20 text-xs text-gray-600 text-right shrink-0">{label}</div>
+      <div className="flex-1 bg-gray-100 rounded h-5 relative overflow-hidden">
+        <div className="h-5 rounded" style={{width:`${pct}%`,background:color}}/>
+        <span className="absolute right-2 top-0 text-xs leading-5 font-mono font-bold text-gray-700">{val.toFixed(1)}%</span>
+      </div>
+    </div>
+  );
+}
+
+/* ── PROB BARS ───────────────────────────────────────────────── */
+
+function ProbBar({ label, val, color }){
+  return (
+    <div className="mb-2">
+      <div className="flex justify-between text-xs mb-1">
+        <span className="text-gray-600 font-medium">{label}</span>
+        <span className="font-mono font-bold" style={{color}}>{pct(val)}</span>
+      </div>
+      <div className="w-full bg-gray-100 rounded-full h-2">
+        <div className="h-2 rounded-full" style={{width:`${val*100}%`,background:color}}/>
+      </div>
+    </div>
+  );
+}
+
+/* ── MATCH DETAIL MODAL ──────────────────────────────────────── */
+
+function Modal({ m, onClose }){
+  const [inj, setInj] = useState(null);
+  const pred = inj ? predict(m.hn, m.an, inj) : m.pred;
+  const hT=TEAMS[m.hn], aT=TEAMS[m.an];
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+
+        {/* header */}
+        <div className="bg-gradient-to-r from-blue-700 to-indigo-700 text-white p-5 rounded-t-2xl">
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-xs opacity-75 font-semibold uppercase tracking-wider">{m.stage}{m.group?` · Group ${m.group}`:''} · {m.date}</span>
+            <button onClick={onClose} className="text-xl leading-none opacity-70 hover:opacity-100">✕</button>
+          </div>
+          <div className="flex items-center justify-around mt-3">
+            <div className="text-center">
+              <div className="text-5xl mb-1">{hT.flag}</div>
+              <div className="font-bold">{m.hn}</div>
+              <div className="text-xs opacity-60">ELO {hT.elo}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-gray-300 text-2xl mb-1">VS</div>
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${cBadge(pred.conf)}`}>{cDot(pred.conf)} {pred.conf}</span>
+            </div>
+            <div className="text-center">
+              <div className="text-5xl mb-1">{aT.flag}</div>
+              <div className="font-bold">{m.an}</div>
+              <div className="text-xs opacity-60">ELO {aT.elo}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {pred.injNote && <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg p-3">⚠️ {pred.injNote}</div>}
+
+          {/* outcome probs */}
+          <div>
+            <h3 className="font-semibold text-gray-800 mb-3">Outcome Probabilities</h3>
+            <ProbBar label={`${m.hn} Win`} val={pred.wp} color="#3B82F6"/>
+            <ProbBar label="Draw" val={pred.dp} color="#94A3B8"/>
+            <ProbBar label={`${m.an} Win`} val={pred.lp} color="#F59E0B"/>
+          </div>
+
+          {/* xG summary */}
+          <div className="bg-blue-50 rounded-xl p-4 grid grid-cols-3 text-center gap-2">
+            <div><div className="text-xl font-bold text-blue-600 font-mono">{pred.hxg}</div><div className="text-xs text-gray-500">{m.hn.split(' ')[0]} xG</div></div>
+            <div><div className="text-xl font-bold text-gray-600 font-mono">{pred.txg}</div><div className="text-xs text-gray-500">Total xG</div></div>
+            <div><div className="text-xl font-bold text-amber-500 font-mono">{pred.axg}</div><div className="text-xs text-gray-500">{m.an.split(' ')[0]} xG</div></div>
+          </div>
+
+          {/* xG & half charts */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Expected Goals</h4>
+              <BarChart bars={[{label:m.hn.split(' ')[0],val:pred.hxg},{label:m.an.split(' ')[0],val:pred.axg}]} maxVal={3} color={['#3B82F6','#F59E0B']}/>
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Goals by Half</h4>
+              <BarChart bars={[{label:'1st Half',val:pred.h1},{label:'2nd Half',val:pred.h2}]} maxVal={2} color="#6366F1"/>
+            </div>
+          </div>
+
+          {/* scorelines */}
+          <div>
+            <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Top Scorelines</h4>
+            <div className="grid grid-cols-2 gap-1">
+              {pred.sc.map((s,i)=>(
+                <div key={i} className="flex items-center justify-between bg-gray-50 rounded px-3 py-1.5">
+                  <span className="font-mono font-bold text-sm text-gray-800">{s.score}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="bg-blue-200 h-1.5 rounded" style={{width:`${Math.min(60,s.prob*500)}px`}}/>
+                    <span className="text-xs text-gray-500 font-mono">{pct(s.prob)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* what-if */}
+          <div className="border border-dashed border-gray-200 rounded-xl p-4">
+            <h4 className="font-semibold text-gray-700 mb-1">🔮 What-If: Key Player Injury</h4>
+            <p className="text-xs text-gray-400 mb-3">See how a key injury shifts the prediction</p>
+            <div className="flex gap-2 flex-wrap">
+              {[m.hn, m.an].map(team=>(
+                <button key={team} onClick={()=>setInj(inj===team?null:team)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${inj===team?'bg-red-50 border-red-400 text-red-700':'bg-gray-50 border-gray-200 text-gray-600 hover:border-red-300'}`}>
+                  {TEAMS[team].flag} {team} injury
+                </button>
+              ))}
+              {inj && <button onClick={()=>setInj(null)} className="px-3 py-1.5 text-sm text-gray-400 hover:text-gray-600">Clear</button>}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── MATCH CARD ──────────────────────────────────────────────── */
+
+function MatchCard({ m, onClick }){
+  const p=m.pred, h=TEAMS[m.hn], a=TEAMS[m.an];
+  return (
+    <div onClick={onClick} className="bg-white border border-gray-100 rounded-xl p-4 cursor-pointer card-hover shadow-sm hover:border-blue-200">
+      <div className="flex justify-between items-center mb-2">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-semibold bg-blue-50 text-blue-700 px-2 py-0.5 rounded">{m.stage}</span>
+          {m.group && <span className="text-xs text-gray-400">Group {m.group}</span>}
+        </div>
+        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${cBadge(p.conf)}`}>{cDot(p.conf)} {p.conf}</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 flex-1">
+          <span className="text-2xl">{h.flag}</span>
+          <div><div className="font-semibold text-sm text-gray-900">{m.hn}</div><div className="text-xs text-gray-400">ELO {h.elo}</div></div>
+        </div>
+        <div className="text-center px-2">
+          <div className="text-xs text-gray-400 font-mono">{m.date}</div>
+          <div className="text-gray-300 font-bold">vs</div>
+          <div className="text-xs font-mono text-gray-400">{p.txg} xG</div>
+        </div>
+        <div className="flex items-center gap-2 flex-1 justify-end">
+          <div className="text-right"><div className="font-semibold text-sm text-gray-900">{m.an}</div><div className="text-xs text-gray-400">ELO {a.elo}</div></div>
+          <span className="text-2xl">{a.flag}</span>
+        </div>
+      </div>
+      <div className="flex h-1.5 rounded-full overflow-hidden mt-3">
+        <div style={{width:`${p.wp*100}%`,background:'#3B82F6'}}/>
+        <div style={{width:`${p.dp*100}%`,background:'#94A3B8'}}/>
+        <div style={{width:`${p.lp*100}%`,background:'#F59E0B'}}/>
+      </div>
+      <div className="flex justify-between text-xs font-mono mt-1">
+        <span className="text-blue-600">{pctI(p.wp)}</span>
+        <span className="text-gray-400">{pctI(p.dp)}</span>
+        <span className="text-amber-500">{pctI(p.lp)}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ── FIXTURES TAB ────────────────────────────────────────────── */
+
+function FixturesTab(){
+  const [q, setQ] = useState('');
+  const [cf, setCf] = useState('all');
+  const [sf, setSf] = useState('all');
+  const [sel, setSel] = useState(null);
+  const stages = ['all','Group','Round of 16','Quarter-Final','Semi-Final','Final'];
+  const filtered = useMemo(()=>MATCHES.filter(m=>{
+    const ql=q.toLowerCase();
+    return (!ql||m.hn.toLowerCase().includes(ql)||m.an.toLowerCase().includes(ql))
+      &&(cf==='all'||m.pred.conf===cf)&&(sf==='all'||m.stage===sf);
+  }),[q,cf,sf]);
+  return (
+    <div>
+      <div className="bg-white border-b border-gray-100 p-4 space-y-3 sticky top-0 z-10">
+        <div className="relative">
+          <span className="absolute left-3 top-2.5 text-gray-400 text-sm">🔍</span>
+          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search teams…"
+            className="w-full pl-8 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {['all','high','medium','low'].map(c=>(
+            <button key={c} onClick={()=>setCf(c)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${cf===c?'bg-blue-600 text-white border-blue-600':'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}>
+              {c==='all'?'All Confidence':`${cDot(c)} ${c}`}
+            </button>
+          ))}
+          <span className="border-l border-gray-200"/>
+          {stages.map(s=>(
+            <button key={s} onClick={()=>setSf(s)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${sf===s?'bg-indigo-600 text-white border-indigo-600':'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'}`}>
+              {s==='all'?'All Stages':s}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="px-4 pt-2 pb-0 text-sm text-gray-500">{filtered.length} match{filtered.length!==1?'es':''} found</div>
+      <div className="p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {filtered.length===0&&<div className="col-span-3 text-center py-16 text-gray-400"><div className="text-4xl mb-2">⚽</div><p>No matches found</p></div>}
+        {filtered.map(m=><MatchCard key={m.id} m={m} onClick={()=>setSel(m)}/>)}
+      </div>
+      {sel&&<Modal m={sel} onClose={()=>setSel(null)}/>}
+    </div>
+  );
+}
+
+/* ── BRACKET TAB ─────────────────────────────────────────────── */
+
+function BracketTab(){
+  const [sel, setSel] = useState(null);
+  const r16=MATCHES.filter(m=>m.stage==='Round of 16');
+  const qf =MATCHES.filter(m=>m.stage==='Quarter-Final');
+  const sf =MATCHES.filter(m=>m.stage==='Semi-Final');
+  const fin=MATCHES.filter(m=>m.stage==='Final');
+  const champ=fin[0]?(fin[0].pred.wp>fin[0].pred.lp?fin[0].hn:fin[0].an):null;
+
+  function Mini({m}){
+    const p=m.pred,h=TEAMS[m.hn],a=TEAMS[m.an];
+    const winner=p.wp>p.lp?m.hn:m.an;
+    const wf=p.wp>p.lp?h.flag:a.flag;
+    return (
+      <div onClick={()=>setSel(m)} className="bg-white border border-gray-200 rounded-lg p-2 cursor-pointer hover:border-blue-400 hover:shadow transition-all w-44 text-xs">
+        <div className="flex justify-between text-gray-400 mb-1"><span>{m.date.slice(5)}</span><span>{cDot(p.conf)}</span></div>
+        <div className={`flex justify-between py-0.5 ${p.wp>p.lp?'font-bold text-blue-700':'text-gray-600'}`}>
+          <span>{h.flag} {m.hn.split(' ')[0]}</span><span className="font-mono">{pctI(p.wp)}</span>
+        </div>
+        <div className="bg-gray-100 h-1 rounded my-1"><div className="h-1 rounded bg-blue-400" style={{width:`${p.wp*100}%`}}/></div>
+        <div className={`flex justify-between py-0.5 ${p.lp>p.wp?'font-bold text-amber-600':'text-gray-600'}`}>
+          <span>{a.flag} {m.an.split(' ')[0]}</span><span className="font-mono">{pctI(p.lp)}</span>
+        </div>
+        <div className="mt-1 pt-1 border-t border-dashed border-gray-100 text-center text-gray-400">→ {wf} {winner.split(' ')[0]}</div>
+      </div>
+    );
+  }
+
+  function Col({title, ms, color}){
+    return (
+      <div className="flex flex-col items-center gap-3">
+        <div className={`text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full ${color}`}>{title}</div>
+        <div className="flex flex-col gap-3">{ms.map(m=><Mini key={m.id} m={m}/>)}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4">
+      {champ&&(
+        <div className="bg-gradient-to-r from-yellow-400 to-amber-500 text-white rounded-2xl p-4 mb-6 text-center shadow-lg">
+          <div className="text-4xl mb-1">{TEAMS[champ].flag} 🏆</div>
+          <div className="text-xl font-bold">Predicted Champion: {champ}</div>
+          <div className="text-sm opacity-80 mt-1">
+            {pct(fin[0].pred.wp>fin[0].pred.lp?fin[0].pred.wp:fin[0].pred.lp)} win probability in the Final
+          </div>
+        </div>
+      )}
+      <div className="overflow-x-auto pb-4">
+        <div className="flex gap-6 min-w-max items-start justify-center">
+          <Col title="R16" ms={r16.slice(0,4)} color="bg-blue-50 text-blue-700"/>
+          <Col title="QF" ms={qf.slice(0,2)} color="bg-indigo-50 text-indigo-700"/>
+          <Col title="SF" ms={sf.slice(0,1)} color="bg-purple-50 text-purple-700"/>
+          <Col title="Final" ms={fin} color="bg-yellow-50 text-yellow-700"/>
+          <Col title="SF" ms={sf.slice(1)} color="bg-purple-50 text-purple-700"/>
+          <Col title="QF" ms={qf.slice(2)} color="bg-indigo-50 text-indigo-700"/>
+          <Col title="R16" ms={r16.slice(4)} color="bg-blue-50 text-blue-700"/>
+        </div>
+      </div>
+      {sel&&<Modal m={sel} onClose={()=>setSel(null)}/>}
+    </div>
+  );
+}
+
+/* ── TEAMS TAB ───────────────────────────────────────────────── */
+
+function TeamsTab(){
+  const [by, setBy] = useState('elo');
+  const [dir, setDir] = useState('desc');
+
+  const rows = useMemo(()=>{
+    return Object.entries(TEAMS).map(([name,d])=>{
+      const tm=MATCHES.filter(m=>m.hn===name||m.an===name);
+      const wins=tm.filter(m=>m.hn===name?m.pred.wp>0.45:m.pred.lp>0.45).length;
+      const txg=tm.reduce((s,m)=>s+(m.hn===name?m.pred.hxg:m.pred.axg),0);
+      return {name,flag:d.flag,group:d.group,elo:d.elo,form:d.form,mv:d.mv,conf:d.conf,
+        winPct:tm.length?wins/tm.length:0, avgXG:tm.length?+(txg/tm.length).toFixed(2):0};
+    }).sort((a,b)=>dir==='desc'?b[by]-a[by]:a[by]-b[by]);
+  },[by,dir]);
+
+  function Th({col,label}){
+    const active=by===col;
+    return <th className="px-3 py-3 text-right cursor-pointer" onClick={()=>{if(active)setDir(d=>d==='desc'?'asc':'desc');else{setBy(col);setDir('desc');}}}>
+      <span className={`text-xs font-semibold uppercase tracking-wider ${active?'text-blue-600':'text-gray-400'}`}>{label}{active?(dir==='desc'?' ↓':' ↑'):''}</span>
+    </th>;
+  }
+
+  function eloC(e){return e>=1700?'text-emerald-600 font-bold':e>=1600?'text-blue-600 font-semibold':e>=1500?'text-gray-700':'text-gray-400';}
+
+  return (
+    <div className="p-4">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="p-4 border-b border-gray-100">
+          <h2 className="font-bold text-gray-800 text-lg">Team Strength Rankings</h2>
+          <p className="text-sm text-gray-500">32 teams · click headers to sort</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="px-3 py-3 text-left text-xs text-gray-400 w-8">#</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">Team</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">Grp</th>
+                <Th col="elo" label="ELO"/>
+                <Th col="form" label="Form"/>
+                <Th col="mv" label="€M"/>
+                <Th col="winPct" label="Win%"/>
+                <Th col="avgXG" label="xG"/>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {rows.map((t,i)=>(
+                <tr key={t.name} className="hover:bg-blue-50 transition-colors">
+                  <td className="px-3 py-2.5 text-gray-400 font-mono text-xs">{i+1}</td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">{t.flag}</span>
+                      <div><div className="font-semibold text-gray-900">{t.name}</div><div className="text-xs text-gray-400">{t.conf}</div></div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5"><span className="bg-blue-50 text-blue-700 text-xs font-bold px-2 py-0.5 rounded">{t.group}</span></td>
+                  <td className={`px-3 py-2.5 text-right font-mono ${eloC(t.elo)}`}>{t.elo}</td>
+                  <td className="px-3 py-2.5 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <div className="w-10 bg-gray-100 rounded-full h-1.5"><div className="h-1.5 rounded-full bg-emerald-400" style={{width:`${t.form*100}%`}}/></div>
+                      <span className="font-mono text-xs text-gray-600">{Math.round(t.form*100)}%</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono text-gray-700">{t.mv}</td>
+                  <td className="px-3 py-2.5 text-right font-mono">
+                    <span className={t.winPct>0.5?'text-emerald-600 font-bold':t.winPct>0.35?'text-blue-600':'text-gray-500'}>{Math.round(t.winPct*100)}%</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono text-gray-600">{t.avgXG}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── ANALYSIS TAB ────────────────────────────────────────────── */
+
+function AnalysisTab(){
+  const metrics=[
+    {name:'Accuracy',val:(META.accuracy*100).toFixed(1),unit:'%',desc:'Correct outcome predictions',bg:'bg-blue-50',text:'text-blue-700',border:'#3B82F640'},
+    {name:'Brier Score',val:META.brier,unit:'',desc:'Calibration — lower is better',bg:'bg-emerald-50',text:'text-emerald-700',border:'#10B98140'},
+    {name:'AUC-ROC',val:META.auc,unit:'',desc:'Discrimination (0.5 = random)',bg:'bg-violet-50',text:'text-violet-700',border:'#8B5CF640'},
+    {name:'Goals MAE',val:META.goalsMae,unit:'',desc:'Mean absolute error in goals',bg:'bg-amber-50',text:'text-amber-700',border:'#F59E0B40'},
+  ];
+  const benchmarks=[
+    {name:'Random baseline',acc:33.3,color:'#CBD5E1'},
+    {name:'ELO only',acc:38.5,color:'#CBD5E1'},
+    {name:'Our BNN model',acc:42.98,color:'#3B82F6'},
+    {name:'Human experts',acc:46.0,color:'#CBD5E1'},
+  ];
+  const historical=[
+    {m:'ARG v SAU',pred:'ARG Win 78%',actual:'SAU Win',ok:false},
+    {m:'BRA v SWI',pred:'BRA Win 71%',actual:'Draw',ok:false},
+    {m:'ESP v CRC',pred:'ESP Win 85%',actual:'ESP Win',ok:true},
+    {m:'ENG v IRN',pred:'ENG Win 79%',actual:'ENG Win',ok:true},
+    {m:'FRA v AUS',pred:'FRA Win 80%',actual:'FRA Win',ok:true},
+    {m:'GER v JPN',pred:'GER Win 72%',actual:'JPN Win',ok:false},
+    {m:'POR v URU',pred:'Draw 35%',actual:'Draw',ok:true},
+    {m:'NED v SEN',pred:'NED Win 68%',actual:'NED Win',ok:true},
+  ];
+  const maxAcc=50;
+  return (
+    <div className="p-4 space-y-6">
+      <div className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-2xl p-5">
+        <h2 className="text-lg font-bold mb-1">🤖 {META.model_type}</h2>
+        <p className="text-sm opacity-80">Trained on {META.dataset_size.toLocaleString()} matches · {META.features_used} engineered features</p>
+        <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+          {[['38,420','Training matches'],[META.features_used,'Features'],[META.training_date,'Trained']].map(([v,l])=>(
+            <div key={l} className="bg-white/10 rounded-lg p-2">
+              <div className="font-mono font-bold">{v}</div>
+              <div className="text-xs opacity-70">{l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="font-bold text-gray-800 mb-3">Validation Metrics</h3>
+        <div className="grid grid-cols-2 gap-3">
+          {metrics.map(m=>(
+            <div key={m.name} className={`${m.bg} border rounded-xl p-4`} style={{borderColor:m.border}}>
+              <div className={`text-2xl font-bold font-mono ${m.text}`}>{m.val}{m.unit}</div>
+              <div className="font-semibold text-gray-800 text-sm mt-1">{m.name}</div>
+              <div className="text-xs text-gray-500 mt-0.5">{m.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+        <h3 className="font-bold text-gray-800 mb-4">Model vs Benchmarks</h3>
+        {benchmarks.map(b=>(
+          <HorizBar key={b.name} label={b.name} val={b.acc} max={maxAcc} color={b.color}/>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-gray-100">
+          <h3 className="font-bold text-gray-800">Historical Accuracy — 2022 World Cup Sample</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Retrospective validation</p>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+            <tr><th className="px-4 py-2 text-left">Match</th><th className="px-4 py-2 text-left">Predicted</th><th className="px-4 py-2 text-left">Actual</th><th className="px-4 py-2 text-center">✓</th></tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {historical.map((h,i)=>(
+              <tr key={i} className="hover:bg-gray-50">
+                <td className="px-4 py-2 font-semibold text-gray-700">{h.m}</td>
+                <td className="px-4 py-2 text-gray-500 text-xs">{h.pred}</td>
+                <td className="px-4 py-2 text-gray-500 text-xs">{h.actual}</td>
+                <td className="px-4 py-2 text-center">{h.ok?<span className="text-emerald-600 font-bold">✓</span>:<span className="text-red-400">✗</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="p-3 bg-gray-50 text-center text-sm text-gray-500">
+          Sample: <span className="font-bold text-blue-600">{historical.filter(h=>h.ok).length}/{historical.length}</span> correct ({Math.round(historical.filter(h=>h.ok).length/historical.length*100)}%)
+        </div>
+      </div>
+
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+        <h4 className="font-bold text-amber-800 mb-2">📊 How to read predictions</h4>
+        <ul className="text-xs text-amber-800 space-y-1">
+          <li>• <strong>Win%</strong> = probability home team wins in 90 min</li>
+          <li>• <strong>xG</strong> = expected goals from chance quality</li>
+          <li>• <strong>🟢 High confidence</strong> = win/loss gap &gt; 25 pp</li>
+          <li>• Scorelines use Poisson distribution — football is unpredictable!</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/* ── APP ─────────────────────────────────────────────────────── */
+
+function App(){
+  const [tab, setTab] = useState('fixtures');
+  useEffect(()=>{
+    document.getElementById('loading').style.display='none';
+  },[]);
+
+  const highConf=MATCHES.filter(m=>m.pred.conf==='high').length;
+  const avgXG=(MATCHES.reduce((s,m)=>s+m.pred.txg,0)/MATCHES.length).toFixed(2);
+
+  const tabs=[
+    {id:'fixtures',label:'📋 Fixtures'},
+    {id:'bracket', label:'🏆 Bracket'},
+    {id:'teams',   label:'📊 Teams'},
+    {id:'analysis',label:'🤖 Analysis'},
+  ];
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* HEADER */}
+      <div className="bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 text-white shadow-lg">
+        <div className="max-w-6xl mx-auto px-4 py-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">⚽ 2026 World Cup Predictions</h1>
+              <p className="text-blue-200 text-sm mt-0.5">AI-Powered · Bayesian Neural Network + ELO Ensemble</p>
+            </div>
+            <div className="flex gap-2 text-center">
+              {[[MATCHES.length,'Matches'],[highConf,'High Conf'],[avgXG,'Avg xG'],['42.98%','Accuracy']].map(([v,l])=>(
+                <div key={l} className="bg-white/10 rounded-lg px-3 py-2 min-w-[60px]">
+                  <div className="font-bold font-mono">{v}</div>
+                  <div className="text-xs opacity-70">{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="max-w-6xl mx-auto px-4">
+          <div className="flex gap-1">
+            {tabs.map(t=>(
+              <button key={t.id} onClick={()=>setTab(t.id)}
+                className={`px-4 py-3 text-sm font-medium border-b-2 tab-btn ${tab===t.id?'border-white text-white':'border-transparent text-blue-200 hover:text-white hover:border-blue-300'}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* CONTENT */}
+      <div className="max-w-6xl mx-auto">
+        {tab==='fixtures' && <FixturesTab/>}
+        {tab==='bracket'  && <BracketTab/>}
+        {tab==='teams'    && <TeamsTab/>}
+        {tab==='analysis' && <AnalysisTab/>}
+      </div>
+
+      {/* FOOTER */}
+      <div className="max-w-6xl mx-auto px-4 py-6 mt-8 border-t border-gray-200">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <span className="text-sm text-gray-500">2026 FIFA World Cup · USA, Canada &amp; Mexico · AI Predictions Dashboard</span>
+          <div className="flex gap-2">
+            <button onClick={exportCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">📥 Export CSV</button>
+            <button onClick={()=>{
+              const txt=MATCHES.slice(0,5).map(m=>`${m.hn} vs ${m.an}: ${pctI(m.pred.wp)}/${pctI(m.pred.dp)}/${pctI(m.pred.lp)}`).join('\n');
+              navigator.clipboard?.writeText(txt).then(()=>alert('Copied top 5 predictions!'));
+            }} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors">📋 Copy</button>
+          </div>
+        </div>
+        <p className="text-xs text-gray-400 mt-3 text-center">Accuracy 42.98% · Brier 0.243 · AUC-ROC 0.612 · Predictions are probabilistic estimates</p>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
